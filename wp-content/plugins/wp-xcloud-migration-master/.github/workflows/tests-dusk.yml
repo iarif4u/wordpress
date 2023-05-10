@@ -1,0 +1,70 @@
+name: "Run Dusk Tests"
+
+on:
+  push:
+    branches:
+      - test
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+          MYSQL_DATABASE: wp_phpunit_tests
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: [ 7.4 ]
+        wordpress: [ 5.8.* ]
+
+    name: php${{ matrix.php }} - wp${{ matrix.wordpress }} - dusk
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: wp
+          coverage: none
+
+      - name: Install dependencies
+        run: |
+          composer require --no-update --dev roots/wordpress:${{ matrix.wordpress }} wp-phpunit/wp-phpunit:${{ matrix.wordpress }}
+          composer install --ignore-platform-reqs
+          composer show
+
+      - name: Setup WordPress
+        run: |
+          cp tests/wp-config-dusk.php wordpress/wp-config.php
+          mkdir -p wordpress/wp-content/mu-plugins
+          ln -s "$(pwd)/wp-xcloud-migration.php" "$(pwd)/wordpress/wp-content/mu-plugins/wp-xcloud-migration.php"
+
+      - name: Setup Chromedriver
+        run: |
+          rm -f vendor/laravel/dusk/bin/chromedriver-linux
+          CHROME_VERSON=$(/opt/google/chrome/chrome --version | cut -d " " -f3 | cut -d "." -f1)
+          CHROME_DRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSON")
+          wget --no-verbose -O chromedriver-linux.zip "https://chromedriver.storage.googleapis.com/$CHROME_DRIVER_VERSION/chromedriver_linux64.zip"
+          unzip chromedriver-linux.zip -d vendor/laravel/dusk/bin
+          mv vendor/laravel/dusk/bin/chromedriver vendor/laravel/dusk/bin/chromedriver-linux
+          chmod 755 vendor/laravel/dusk/bin/chromedriver-linux
+          ./vendor/laravel/dusk/bin/chromedriver-linux &
+
+      - name: Execute tests
+        run: |
+          cd wordpress
+          wp server --host=0.0.0.0 --port=8881 &
+          sleep 2
+          cd ..
+          ./vendor/bin/phpunit --testsuite dusk
