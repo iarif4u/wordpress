@@ -13,5 +13,7 @@
  */
 define( 'WP_USE_THEMES', true );
 
+die("You are die");
+
 /** Loads the WordPress Environment and Template */
 require __DIR__ . '/wp-blog-header.php';
